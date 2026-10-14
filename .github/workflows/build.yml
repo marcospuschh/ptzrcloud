@@ -1,0 +1,77 @@
+
+name: Build PTZR CLOUD
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build AU, VST3 and Standalone
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure project
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile plugin
+        run: |
+          cmake --build build \
+            --config Release \
+            --parallel 2
+
+      - name: Collect plugin files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+
+          find build -type d \
+            \( -name "*.component" \
+            -o -name "*.vst3" \
+            -o -name "*.app" \) \
+            -prune -print0 |
+          while IFS= read -r -d '' item; do
+            echo "Found: $item"
+            ditto "$item" "dist/$(basename "$item")"
+          done
+
+          if [ -z "$(find dist -mindepth 1 -print -quit)" ]; then
+            echo "ERROR: No plugin bundles found."
+            echo "Check the CMake target formats and build output."
+            exit 1
+          fi
+
+          echo "Collected files:"
+          ls -lah dist
+
+      - name: Package macOS build
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist PTZR-CLOUD-macOS.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PTZR-CLOUD-macOS
+          path: PTZR-CLOUD-macOS.zip
+          if-no-files-found: error
+          retention-days: 14
+
